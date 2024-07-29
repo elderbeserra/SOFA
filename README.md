@@ -1,0 +1,2 @@
+# SOFA
+SOFA - Face Anonymizer
