@@ -1,48 +1,55 @@
-from PyQt5.QtCore import QDir, Qt, QUrl, pyqtSlot, pyqtSignal
-from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
-from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
-        QSizePolicy, QSlider, QStyle, QVBoxLayout, QWidget, QTableWidget,
-        QTableWidgetItem, QMainWindow, QAction, QAbstractScrollArea, QShortcut,
-        QSpacerItem, QProgressBar, QMessageBox)
-
-from utils import create_action, format_time
-from bad_clips_table import BadClipsWidget
-from bad_clips_slider import HlightSliderTipsWidget
-from proc_bar_dialog import ProcVideoDialog
-from signals import SignalBus
-from utils import get_metadata_colors
-
 import os
 import sys
 from functools import partial
-from moviepy.editor import VideoFileClip
 
+from moviepy.editor import VideoFileClip
+from PyQt5.QtCore import QDir, Qt, QUrl, pyqtSlot
+from PyQt5.QtGui import QIcon, QKeySequence
+from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
+from PyQt5.QtMultimediaWidgets import QVideoWidget
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpacerItem,
+    QStyle,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .bad_clips_slider import HlightSliderTipsWidget
+from .bad_clips_table import BadClipsWidget
+from .proc_bar_dialog import ProcVideoDialog
+from .signals import SignalBus
+from .utils import create_action, format_time, get_metadata_colors
 
 TMP_VIDEO_PATH = os.path.join(QDir.homePath(), 'tmp_proc_video.mp4')
 
 
 class VideoWindow(QMainWindow):
-
-    def __init__(self, app, parent=None):
-        super(VideoWindow, self).__init__(parent)
+    def __init__(self, app: QApplication, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         self.app = app
-        self.setWindowTitle("sofa")
+        self.setWindowTitle('sofa')
         self.setWindowIcon(QIcon('src/static/img/tofu.png'))
-        self.rate = 1
-        self.isNewMark = False
-        self.openedFile = None
+        self.rate: float = 1
+        self.isNewMark: bool = False
+        self.openedFile: str | None = None
         self.initUI()
         self.set_default_shortcuts()
-        self.shortcuts = {}
+        self.shortcuts: dict = {}
         self.comm = SignalBus.instance()
 
-    def initUI(self):
+    def initUI(self) -> None:
         videoWidget = self.create_player()
         self.errorLabel = QLabel()
-        self.errorLabel.setSizePolicy(QSizePolicy.Preferred,
-                QSizePolicy.Maximum)
+        self.errorLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.create_menu_bar()
         self.wid = QWidget(self)
         self.setCentralWidget(self.wid)
@@ -53,7 +60,7 @@ class VideoWindow(QMainWindow):
         self.mediaPlayer.durationChanged.connect(self.durationChanged)
         self.mediaPlayer.error.connect(self.handleError)
 
-    def create_player(self):
+    def create_player(self) -> QVideoWidget:
         self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
 
         videoWidget = QVideoWidget()
@@ -72,7 +79,7 @@ class VideoWindow(QMainWindow):
 
         return videoWidget
 
-    def set_default_shortcuts(self):
+    def set_default_shortcuts(self) -> None:
         self.playButton.setShortcut(QKeySequence(Qt.Key_Space))
         self.speedUpButton.setShortcut(QKeySequence(Qt.Key_Up))
         self.slowDownButton.setShortcut(QKeySequence(Qt.Key_Down))
@@ -80,23 +87,29 @@ class VideoWindow(QMainWindow):
         self.goBackButton.setShortcut(QKeySequence(Qt.Key_Left))
         self.cutButton.setShortcut(QKeySequence(Qt.Key_C))
 
-    def create_control(self):
-        self.playButton = _create_button(
-                self.style().standardIcon(QStyle.SP_MediaPlay))
+    def create_control(self) -> None:
+        self.playButton = _create_button(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.speedUpButton = _create_button(
-                self.style().standardIcon(QStyle.SP_MediaSeekForward))
+            self.style().standardIcon(QStyle.SP_MediaSeekForward)
+        )
         self.slowDownButton = _create_button(
-                self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+            self.style().standardIcon(QStyle.SP_MediaSeekBackward)
+        )
         self.adv3Button = _create_button(
-                self.style().standardIcon(QStyle.SP_ArrowRight))
+            self.style().standardIcon(QStyle.SP_ArrowRight)
+        )
         self.advanceButton = _create_button(
-                self.style().standardIcon(QStyle.SP_MediaSkipForward))
+            self.style().standardIcon(QStyle.SP_MediaSkipForward)
+        )
         self.goBack3Button = _create_button(
-                self.style().standardIcon(QStyle.SP_ArrowLeft))
+            self.style().standardIcon(QStyle.SP_ArrowLeft)
+        )
         self.goBackButton = _create_button(
-                self.style().standardIcon(QStyle.SP_MediaSkipBackward))
-        self.cutButton = _create_button(self.style().standardIcon(
-            QStyle.SP_MessageBoxCritical))
+            self.style().standardIcon(QStyle.SP_MediaSkipBackward)
+        )
+        self.cutButton = _create_button(
+            self.style().standardIcon(QStyle.SP_MessageBoxCritical)
+        )
         self.timeBox = QLabel(format_time(0), self)
         self.timeBox.setAlignment(Qt.AlignCenter)
         self.rateBox = QLabel(str(self.rate) + 'x', self)
@@ -105,13 +118,21 @@ class VideoWindow(QMainWindow):
         self.positionSlider = QSlider(Qt.Horizontal)
         self.positionSlider.setRange(0, 0)
 
-    def create_menu_bar(self):
-        openAction = create_action('open.png', '&Open', 'Ctrl+O', 'Open video',
-                self.openFile, self)
-        saveAction = create_action('save.png', '&Save Clips', 'Ctrl+S',
-                'Save anonimized clips', self.saveClips, self)
-        exitAction = create_action('exit.png', '&Exit', 'Ctrl+Q', 'Exit',
-                self.exitCall, self)
+    def create_menu_bar(self) -> None:
+        openAction = create_action(
+            'open.png', '&Open', 'Ctrl+O', 'Open video', self.openFile, self
+        )
+        saveAction = create_action(
+            'save.png',
+            '&Save Clips',
+            'Ctrl+S',
+            'Save anonimized clips',
+            self.saveClips,
+            self,
+        )
+        exitAction = create_action(
+            'exit.png', '&Exit', 'Ctrl+Q', 'Exit', self.exitCall, self
+        )
 
         menuBar = self.menuBar()
         fileMenu = menuBar.addMenu('&File')
@@ -119,7 +140,7 @@ class VideoWindow(QMainWindow):
         fileMenu.addAction(saveAction)
         fileMenu.addAction(exitAction)
 
-    def set_layout(self, videoWidget, wid):
+    def set_layout(self, videoWidget: QVideoWidget, wid: QWidget) -> None:
         labellingLayout = QVBoxLayout()
         labellingLayout.addWidget(self.clipsWidget)
 
@@ -137,7 +158,7 @@ class VideoWindow(QMainWindow):
 
         wid.setLayout(layout)
 
-    def make_control_layout(self):
+    def make_control_layout(self) -> QVBoxLayout:
         buttonsLayout = QHBoxLayout()
         buttonsLayout.setContentsMargins(0, 0, 0, 0)
         buttonsLayout.addWidget(self.timeBox)
@@ -151,11 +172,13 @@ class VideoWindow(QMainWindow):
         buttonsLayout.addWidget(self.rateBox)
         cutLayout = QHBoxLayout()
         cutLayout.setContentsMargins(0, 0, 0, 0)
-        cutLayout.addSpacerItem(QSpacerItem(200, 5, QSizePolicy.Minimum,
-            QSizePolicy.Minimum))
+        cutLayout.addSpacerItem(
+            QSpacerItem(200, 5, QSizePolicy.Minimum, QSizePolicy.Minimum)
+        )
         cutLayout.addWidget(self.cutButton)
-        cutLayout.addSpacerItem(QSpacerItem(200, 5, QSizePolicy.Minimum,
-            QSizePolicy.Minimum))
+        cutLayout.addSpacerItem(
+            QSpacerItem(200, 5, QSizePolicy.Minimum, QSizePolicy.Minimum)
+        )
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.positionSlider)
@@ -164,40 +187,41 @@ class VideoWindow(QMainWindow):
         layout.addLayout(cutLayout)
         return layout
 
-    def openFile(self):
-        self.rawFileName, _ = QFileDialog.getOpenFileName(self, "Open video",
-                QDir.homePath())
+    def openFile(self) -> None:
+        self.rawFileName, _ = QFileDialog.getOpenFileName(
+            self, 'Open video', QDir.homePath()
+        )
         if self.rawFileName != '':
-            should_process = QMessageBox.question(self.wid, 'Open video',
-                    'Do you want to pre process the video?',
-                    QMessageBox.Yes | QMessageBox.No)
+            should_process = QMessageBox.question(
+                self.wid,
+                'Open video',
+                'Do you want to pre process the video?',
+                QMessageBox.Yes | QMessageBox.No,
+            )
             if should_process == QMessageBox.Yes:
                 self.fileName = TMP_VIDEO_PATH
-                process = ProcVideoDialog(self.rawFileName, self.fileName, self)
+                ProcVideoDialog(self.rawFileName, self.fileName, self)
                 self.comm.videoProcessed.connect(self.openMedia)
             else:
                 self.fileName = self.rawFileName
                 self.processMetaData()
                 self.openMedia()
 
-
-    def processMetaData(self):
-        '''
+    def processMetaData(self) -> None:
+        """
         Get array indicating "suspicious" frames
-        '''
+        """
         # open metadata file
-        self.metaDataFile = self.fileName.rsplit(".", 1)[0] + ".csv"
+        self.metaDataFile = self.fileName.rsplit('.', 1)[0] + '.csv'
         # get only the array with "colors" (==0: green; !=0: red)
         self.colorsArray = get_metadata_colors(self.metaDataFile)
         self.hlightSliderTips.setColorsArray(self.colorsArray, useYellow=False)
 
-
     @pyqtSlot()
-    def openMedia(self):
-        self.mediaPlayer.setMedia(
-                QMediaContent(QUrl.fromLocalFile(self.fileName)))
+    def openMedia(self) -> None:
+        self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(self.fileName)))
         self.openedFile = os.path.basename(self.fileName)
-        self.setWindowTitle("sofa - " + self.openedFile)
+        self.setWindowTitle('sofa - ' + self.openedFile)
         self.playButton.setEnabled(True)
         self.speedUpButton.setEnabled(True)
         self.slowDownButton.setEnabled(True)
@@ -208,18 +232,18 @@ class VideoWindow(QMainWindow):
         self.cutButton.setEnabled(True)
         self.rate = 1
 
-    def exitCall(self):
+    def exitCall(self) -> None:
         if self.openedFile is not None:
             os.remove(self.fileName)
-        sys.exit(self.app.exec_())
+        sys.exit(self.app.exec())
 
-    def play(self):
+    def play(self) -> None:
         if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
             self.mediaPlayer.pause()
         else:
             self.mediaPlayer.play()
 
-    def slow(self):
+    def slow(self) -> None:
         if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
             self.rate -= 0.5
             # TODO: Workaround pt 1
@@ -231,9 +255,9 @@ class VideoWindow(QMainWindow):
             # TODO: Workaround pt 2
             self.mediaPlayer.setPosition(currentPos)
             # TODO: Workaround pt 2: end
-            self.rateBox.setText(str(self.rate)+'x')
+            self.rateBox.setText(str(self.rate) + 'x')
 
-    def speed(self):
+    def speed(self) -> None:
         if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
             self.rate += 0.5
             # TODO: Workaround pt 1
@@ -245,49 +269,46 @@ class VideoWindow(QMainWindow):
             # TODO: Workaround pt 2
             self.mediaPlayer.setPosition(currentPos)
             # TODO: Workaround pt 2: end
-            self.rateBox.setText(str(self.rate)+'x')
+            self.rateBox.setText(str(self.rate) + 'x')
 
-    def advance(self, t=10):
+    def advance(self, t: int = 10) -> None:
         currentPos = self.mediaPlayer.position()
-        nextPos  = currentPos + t*1000
+        nextPos = currentPos + t * 1000
         self.setPosition(nextPos)
 
-    def back(self, t=10):
+    def back(self, t: int = 10) -> None:
         currentPos = self.mediaPlayer.position()
-        nextPos  = max(currentPos - t*1000, 0)
+        nextPos = max(currentPos - t * 1000, 0)
         self.setPosition(nextPos)
 
-    def mediaStateChanged(self, state):
+    def mediaStateChanged(self, state: int) -> None:
         if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
-            self.playButton.setIcon(
-                    self.style().standardIcon(QStyle.SP_MediaPause))
+            self.playButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
         else:
-            self.playButton.setIcon(
-                    self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.playButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
 
-    def positionChanged(self, position):
+    def positionChanged(self, position: int) -> None:
         self.positionSlider.setValue(position)
         self.hlightSliderTips.setValue(position)
-        self.timeBox.setText(format_time(int(position/1000)))
+        self.timeBox.setText(format_time(int(position / 1000)))
 
-    def durationChanged(self, duration):
+    def durationChanged(self, duration: int) -> None:
         self.positionSlider.setRange(0, duration)
         self.hlightSliderTips.setRange(duration)
 
-    def setPosition(self, position):
+    def setPosition(self, position: int) -> None:
         self.mediaPlayer.setPosition(position)
 
-    def handleError(self):
+    def handleError(self) -> None:
         self.playButton.setEnabled(False)
         self.speedUpButton.setEnabled(False)
         self.slowDownButton.setEnabled(False)
         self.advanceButton.setEnabled(False)
         self.goBackButton.setEnabled(False)
-        self.errorLabel.setText("Error: " + self.mediaPlayer.errorString())
+        self.errorLabel.setText('Error: ' + self.mediaPlayer.errorString())
 
-    def saveClips(self):
-        prefix = os.path.splitext(os.path.basename(self.rawFileName))[0] + \
-                '_slice_'
+    def saveClips(self) -> None:
+        prefix = os.path.splitext(os.path.basename(self.rawFileName))[0] + '_slice_'
         dirPath = QFileDialog.getExistingDirectory(self, 'Select Dir')
         if dirPath != '':
             try:
@@ -297,35 +318,37 @@ class VideoWindow(QMainWindow):
                 begin_time = 0.0
                 for i, m in enumerate(marks):
                     end_time = float(m[0])
-                    out_path = os.path.join(dirPath, prefix+str(i)+".mp4")
+                    out_path = os.path.join(dirPath, prefix + str(i) + '.mp4')
                     clip = video.subclip(begin_time, end_time)
                     clip.write_videofile(out_path)
                     begin_time = float(m[1])
-                end_video = self.mediaPlayer.duration()/1000
+                end_video = self.mediaPlayer.duration() / 1000
                 if begin_time < end_video and len(marks) > 0:
                     i = len(marks)
-                    out_path = os.path.join(dirPath, prefix+str(i)+".mp4")
+                    out_path = os.path.join(dirPath, prefix + str(i) + '.mp4')
                     clip = video.subclip(begin_time)
                     clip.write_videofile(out_path)
                 self.errorLabel.setText('Clips saved at ' + dirPath)
-                QMessageBox.information(self.wid, 'Sucess',
-                        'Clips succesfully saved')
-            except:
+                QMessageBox.information(self.wid, 'Success', 'Clips successfully saved')
+            except Exception:
                 self.errorLabel.setText('Error: Could not save file.')
-                QMessageBox.warning(self.wid, 'Error',
-                        'Could not save file. Check permissions')
+                QMessageBox.warning(
+                    self.wid,
+                    'Error',
+                    'Could not save file. Check permissions',
+                )
 
     @pyqtSlot()
-    def createMark(self):
+    def createMark(self) -> None:
         state = self.mediaPlayer.state()
-        if state == QMediaPlayer.PlayingState or state == \
-                QMediaPlayer.PausedState:
-            self.clipsWidget.new_mark(self.mediaPlayer.position()/1000,
-                    self.isNewMark)
+        if state == QMediaPlayer.PlayingState or state == QMediaPlayer.PausedState:
+            self.clipsWidget.new_mark(
+                self.mediaPlayer.position() / 1000, self.isNewMark
+            )
             self.isNewMark = not self.isNewMark
 
 
-def _create_button(icon):
+def _create_button(icon: QIcon) -> QPushButton:
     button = QPushButton()
     button.setIcon(icon)
     button.setEnabled(False)

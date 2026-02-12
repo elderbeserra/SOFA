@@ -1,22 +1,26 @@
-import cv2
-import numpy as np
-import onnx
-import onnxruntime as ort
-from onnx_tf.backend import prepare
 import argparse
 
-from signals import SignalBus
+import cv2
+import numpy as np
+import numpy.typing as npt
+import onnx
+import onnxruntime as ort
 
+from .signals import SignalBus
 
 MODEL_PATH = './models/ultra_light_640.onnx'
 
 
 class UltraLightFaceRecog:
-    def __init__(self):
+    def __init__(self) -> None:
         self.comm = SignalBus.instance()
-        self.running = True
+        self.running: bool = True
 
-    def area_of(self, left_top, right_bottom):
+    def area_of(
+        self,
+        left_top: npt.NDArray[np.floating],
+        right_bottom: npt.NDArray[np.floating],
+    ) -> npt.NDArray[np.floating]:
         """
         Compute the areas of rectangles given two corners.
         Args:
@@ -28,7 +32,12 @@ class UltraLightFaceRecog:
         hw = np.clip(right_bottom - left_top, 0.0, None)
         return hw[..., 0] * hw[..., 1]
 
-    def iou_of(self, boxes0, boxes1, eps=1e-5):
+    def iou_of(
+        self,
+        boxes0: npt.NDArray[np.floating],
+        boxes1: npt.NDArray[np.floating],
+        eps: float = 1e-5,
+    ) -> npt.NDArray[np.floating]:
         """
         Return intersection-over-union (Jaccard index) of boxes.
         Args:
@@ -46,7 +55,13 @@ class UltraLightFaceRecog:
         area1 = self.area_of(boxes1[..., :2], boxes1[..., 2:])
         return overlap_area / (area0 + area1 - overlap_area + eps)
 
-    def hard_nms(self, box_scores, iou_threshold, top_k=-1, candidate_size=200):
+    def hard_nms(
+        self,
+        box_scores: npt.NDArray[np.floating],
+        iou_threshold: float,
+        top_k: int = -1,
+        candidate_size: int = 200,
+    ) -> npt.NDArray[np.floating]:
         """
         Perform hard non-maximum-supression to filter out boxes with iou greater
         than threshold
@@ -79,8 +94,16 @@ class UltraLightFaceRecog:
 
         return box_scores[picked, :]
 
-    def predict(self, width, height, confidences, boxes, prob_threshold,
-            iou_threshold=0.5, top_k=-1):
+    def predict(
+        self,
+        width: int,
+        height: int,
+        confidences: npt.NDArray[np.floating],
+        boxes: npt.NDArray[np.floating],
+        prob_threshold: float,
+        iou_threshold: float = 0.5,
+        top_k: int = -1,
+    ) -> tuple[npt.NDArray[np.int32], npt.NDArray, npt.NDArray[np.floating]]:
         """
         Select boxes that contain human faces
         Args:
@@ -98,8 +121,8 @@ class UltraLightFaceRecog:
         """
         boxes = boxes[0]
         confidences = confidences[0]
-        picked_box_probs = []
-        picked_labels = []
+        picked_box_probs: list[npt.NDArray[np.floating]] = []
+        picked_labels: list[int] = []
         for class_index in range(1, confidences.shape[1]):
             probs = confidences[:, class_index]
             mask = probs > prob_threshold
@@ -108,46 +131,50 @@ class UltraLightFaceRecog:
                 continue
             subset_boxes = boxes[mask, :]
             box_probs = np.concatenate([subset_boxes, probs.reshape(-1, 1)], axis=1)
-            box_probs = self.hard_nms(box_probs,
-            iou_threshold=iou_threshold,
-            top_k=top_k,
+            box_probs = self.hard_nms(
+                box_probs,
+                iou_threshold=iou_threshold,
+                top_k=top_k,
             )
             picked_box_probs.append(box_probs)
             picked_labels.extend([class_index] * box_probs.shape[0])
         if not picked_box_probs:
             return np.array([]), np.array([]), np.array([])
-        picked_box_probs = np.concatenate(picked_box_probs)
-        picked_box_probs[:, 0] *= width
-        picked_box_probs[:, 1] *= height
-        picked_box_probs[:, 2] *= width
-        picked_box_probs[:, 3] *= height
-        return picked_box_probs[:, :4].astype(np.int32), \
-                np.array(picked_labels), picked_box_probs[:, 4]
+        picked_box_probs_arr = np.concatenate(picked_box_probs)
+        picked_box_probs_arr[:, 0] *= width
+        picked_box_probs_arr[:, 1] *= height
+        picked_box_probs_arr[:, 2] *= width
+        picked_box_probs_arr[:, 3] *= height
+        return (
+            picked_box_probs_arr[:, :4].astype(np.int32),
+            np.array(picked_labels),
+            picked_box_probs_arr[:, 4],
+        )
 
-    def load_model(self, model_path):
+    def load_model(self, model_path: str) -> None:
         onnx_model = onnx.load(model_path)
-        predictor = prepare(onnx_model)
+        onnx.checker.check_model(onnx_model)
         self.ort_session = ort.InferenceSession(model_path)
         self.input_name = self.ort_session.get_inputs()[0].name
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
 
-    def blur_faces(self, video_input, video_output):
+    def blur_faces(self, video_input: str, video_output: str) -> None:
         self.load_model(MODEL_PATH)
         video = cv2.VideoCapture(video_input)
         n_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_ctr = 0
         ret, frame = video.read()
-        height , width , layers =  frame.shape
-        new_h = height//2
-        new_w = width//2
+        height, width, layers = frame.shape
+        new_h = height // 2
+        new_w = width // 2
         size = (new_w, new_h)
-        all_frames = []
+        all_frames: list[npt.NDArray] = []
         while self.running:
             ret, frame = video.read()
             frame_ctr += 1
-            self.comm.updProgress.emit(100*frame_ctr/n_frames)
+            self.comm.updProgress.emit(100 * frame_ctr / n_frames)
             if frame is not None:
                 frame = cv2.resize(frame, (new_w, new_h))
                 h, w, _ = frame.shape
@@ -159,15 +186,18 @@ class UltraLightFaceRecog:
                 img = np.expand_dims(img, axis=0)
                 img = img.astype(np.float32)
 
-                confidences, boxes = self.ort_session.run(None,
-                        {self.input_name: img})
-                boxes, labels, probs = self.predict(w, h, confidences, boxes,
-                        0.7)
+                confidences, boxes = self.ort_session.run(None, {self.input_name: img})
+                boxes, labels, probs = self.predict(w, h, confidences, boxes, 0.7)
                 for i in range(boxes.shape[0]):
                     box = boxes[i, :]
                     x1, y1, x2, y2 = box
-                    cv2.rectangle(frame, (x1-10, y1-10), (x2+10, y2+10),
-                            (0,0,0), -1)
+                    cv2.rectangle(
+                        frame,
+                        (x1 - 10, y1 - 10),
+                        (x2 + 10, y2 + 10),
+                        (0, 0, 0),
+                        -1,
+                    )
                 all_frames.append(frame)
             else:
                 break
@@ -175,26 +205,41 @@ class UltraLightFaceRecog:
             self.save_local_video(all_frames, video_output, 30, size)
             self.comm.videoProcessed.emit()
 
-    def save_local_video(self, frames_array, filepath, speed, size):
-        out = cv2.VideoWriter(filepath,cv2.VideoWriter_fourcc(*'mp4v'),
-                round(speed), size)
-        print("Frames array size: ", len(frames_array))
-        for i in range(len(frames_array)):
-            out.write(frames_array[i])
+    def save_local_video(
+        self,
+        frames_array: list[npt.NDArray],
+        filepath: str,
+        speed: float,
+        size: tuple[int, int],
+    ) -> None:
+        out = cv2.VideoWriter(
+            filepath, cv2.VideoWriter_fourcc(*'mp4v'), round(speed), size
+        )
+        print('Frames array size: ', len(frames_array))
+        for frame in frames_array:
+            out.write(frame)
 
         out.release()
-        print("> Video saved at ", filepath)
+        print('> Video saved at ', filepath)
 
 
-if __name__ == "__main__":
-    parser=argparse.ArgumentParser()
-    parser.add_argument('-i', '--video_input', help='Input video path',
-            default= '', dest='video_input')
-    parser.add_argument('-o', '--video_output', help='Output video path',
-            default= '', dest='video_output')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-i',
+        '--video_input',
+        help='Input video path',
+        default='',
+        dest='video_input',
+    )
+    parser.add_argument(
+        '-o',
+        '--video_output',
+        help='Output video path',
+        default='',
+        dest='video_output',
+    )
     args = parser.parse_args()
 
     face_recog = UltraLightFaceRecog()
     face_recog.blur_faces(args.video_input, args.video_output)
-
-
