@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 
 <p align="center">
-  <img src="doc/static/img/tofu.png" alt="SOFA logo" width="120">
+  <img src="doc/static/img/tofu.png" alt="SOFA logo" width="480">
 </p>
 
 SOFA is a minimalist desktop tool for **removing faces from videos** and managing video clips. It uses a lightweight ONNX-based face detection model to automatically detect and blur faces, then provides an intuitive interface for reviewing results and exporting clean clips.
