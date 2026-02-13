@@ -1,4 +1,6 @@
 import argparse
+import csv
+import os
 
 import cv2
 import numpy as np
@@ -6,6 +8,15 @@ import numpy.typing as npt
 import onnx
 import onnxruntime as ort
 
+from .settings import (
+    AnonymizationMode,
+    get_anonymization_mode,
+    get_blur_strength,
+    get_box_padding,
+    get_confidence_threshold,
+    get_gpu_provider,
+    get_output_scale,
+)
 from .signals import SignalBus
 
 MODEL_PATH = './models/ultra_light_640.onnx'
@@ -154,23 +165,74 @@ class UltraLightFaceRecog:
     def load_model(self, model_path: str) -> None:
         onnx_model = onnx.load(model_path)
         onnx.checker.check_model(onnx_model)
-        self.ort_session = ort.InferenceSession(model_path)
+        provider = get_gpu_provider()
+        providers: list[str] = []
+        if provider:
+            providers.append(provider)
+        providers.append('CPUExecutionProvider')
+        try:
+            self.ort_session = ort.InferenceSession(
+                model_path, providers=providers
+            )
+        except (ValueError, RuntimeError):
+            self.ort_session = ort.InferenceSession(model_path)
         self.input_name = self.ort_session.get_inputs()[0].name
 
     def stop(self) -> None:
         self.running = False
 
+    def _apply_anonymization(
+        self,
+        frame: npt.NDArray,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        mode: AnonymizationMode,
+        padding: int,
+        blur_strength: int,
+    ) -> None:
+        h, w = frame.shape[:2]
+        x1 = max(0, x1 - padding)
+        y1 = max(0, y1 - padding)
+        x2 = min(w, x2 + padding)
+        y2 = min(h, y2 + padding)
+        if x1 >= x2 or y1 >= y2:
+            return
+        roi = frame[y1:y2, x1:x2]
+        if mode == AnonymizationMode.BLACK_BOX:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 0), -1)
+        elif mode == AnonymizationMode.BLUR:
+            k = blur_strength if blur_strength % 2 == 1 else blur_strength + 1
+            blurred = cv2.GaussianBlur(roi, (k, k), 0)
+            frame[y1:y2, x1:x2] = blurred
+        elif mode == AnonymizationMode.PIXELATE:
+            scale = max(1, min(roi.shape[0], roi.shape[1]) // 12)
+            small_h, small_w = max(1, (y2 - y1) // scale), max(1, (x2 - x1) // scale)
+            small = cv2.resize(roi, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+            pixelated = cv2.resize(small, (x2 - x1, y2 - y1), interpolation=cv2.INTER_NEAREST)
+            frame[y1:y2, x1:x2] = pixelated
+
     def blur_faces(self, video_input: str, video_output: str) -> None:
         self.load_model(MODEL_PATH)
         video = cv2.VideoCapture(video_input)
         n_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = video.get(cv2.CAP_PROP_FPS)
+        if fps <= 0 or not np.isfinite(fps):
+            fps = 30.0
         frame_ctr = 0
         ret, frame = video.read()
         height, width, layers = frame.shape
-        new_h = height // 2
-        new_w = width // 2
+        scale = get_output_scale()
+        new_h = int(height * scale)
+        new_w = int(width * scale)
         size = (new_w, new_h)
+        mode = get_anonymization_mode()
+        padding = get_box_padding()
+        blur_strength = get_blur_strength()
+        prob_threshold = get_confidence_threshold()
         all_frames: list[npt.NDArray] = []
+        metadata_rows: list[tuple[int, int]] = []
         while self.running:
             ret, frame = video.read()
             frame_ctr += 1
@@ -187,33 +249,32 @@ class UltraLightFaceRecog:
                 img = img.astype(np.float32)
 
                 confidences, boxes = self.ort_session.run(None, {self.input_name: img})
-                boxes, labels, probs = self.predict(w, h, confidences, boxes, 0.7)
+                boxes, labels, probs = self.predict(w, h, confidences, boxes, prob_threshold)
+                face_count = int(boxes.shape[0])
+                metadata_rows.append((len(all_frames), face_count))
                 for i in range(boxes.shape[0]):
                     box = boxes[i, :]
-                    x1, y1, x2, y2 = box
-                    cv2.rectangle(
-                        frame,
-                        (x1 - 10, y1 - 10),
-                        (x2 + 10, y2 + 10),
-                        (0, 0, 0),
-                        -1,
+                    x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+                    self._apply_anonymization(
+                        frame, x1, y1, x2, y2, mode, padding, blur_strength
                     )
                 all_frames.append(frame)
             else:
                 break
         if self.running:
-            self.save_local_video(all_frames, video_output, 30, size)
+            self.save_local_video(all_frames, video_output, fps, size)
+            self._write_metadata_csv(video_output, metadata_rows)
             self.comm.videoProcessed.emit()
 
     def save_local_video(
         self,
         frames_array: list[npt.NDArray],
         filepath: str,
-        speed: float,
+        fps: float,
         size: tuple[int, int],
     ) -> None:
         out = cv2.VideoWriter(
-            filepath, cv2.VideoWriter_fourcc(*'mp4v'), round(speed), size
+            filepath, cv2.VideoWriter_fourcc(*'mp4v'), round(fps) or 30, size
         )
         print('Frames array size: ', len(frames_array))
         for frame in frames_array:
@@ -221,6 +282,19 @@ class UltraLightFaceRecog:
 
         out.release()
         print('> Video saved at ', filepath)
+
+    def _write_metadata_csv(self, video_output: str, metadata_rows: list[tuple[int, int]]) -> None:
+        """Write timeline metadata CSV next to the processed video (frame_num, diff)."""
+        if not metadata_rows:
+            return
+        base, _ = os.path.splitext(video_output)
+        csv_path = base + '.csv'
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['frame_num', 'diff'])
+            for frame_num, diff in metadata_rows:
+                writer.writerow([frame_num, diff])
+        print('> Metadata CSV saved at ', csv_path)
 
 
 if __name__ == '__main__':

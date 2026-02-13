@@ -51,8 +51,6 @@ sudo apt install libgstreamer1.0-0 gstreamer1.0-plugins-base \
 # Clone the repository
 git clone https://github.com/<your-username>/sofa.git
 cd sofa
-
-# Install all dependencies (creates a virtual environment automatically)
 uv sync
 ```
 
@@ -87,7 +85,11 @@ uv run python -m src.face_recog -i input_video.mp4 -o output_video.mp4
 | `Down` | Slow down |
 | `Right` | Skip forward 10s |
 | `Left` | Skip back 10s |
+| `[` | Step back 1 frame |
+| `]` | Step forward 1 frame |
 | `C` | Create clip mark |
+| `Ctrl+Z` | Undo last clip mark |
+| `Ctrl+Shift+Z` | Redo clip mark |
 | `Ctrl+O` | Open video |
 | `Ctrl+S` | Save clips |
 | `Ctrl+Q` | Exit |
@@ -105,6 +107,11 @@ uv run ruff check src/
 uv run ruff format src/
 ```
 
+## Documentation
+
+- **[Model training and inference](doc/MODEL_TRAINING.md)** — UltraLight face detector architecture, training technique, and SOFA inference pipeline.
+- **[CSV metadata format](doc/CSV_METADATA_FORMAT.md)** — Timeline metadata CSV schema and how it integrates with the UI.
+
 ## Project Structure
 
 ```
@@ -112,6 +119,10 @@ sofa/
 ├── pyproject.toml          # Project metadata and dependencies
 ├── models/
 │   └── ultra_light_640.onnx  # Pre-trained face detection model
+├── doc/
+│   ├── MODEL_TRAINING.md   # Face detection model documentation
+│   ├── CSV_METADATA_FORMAT.md  # Timeline metadata CSV format
+│   └── static/img/         # Documentation assets
 ├── src/
 │   ├── __init__.py
 │   ├── main.py             # Application entry point
@@ -123,7 +134,6 @@ sofa/
 │   ├── signals.py          # Qt signal bus (singleton)
 │   ├── utils.py            # Utility functions
 │   └── static/img/         # Application icons
-└── doc/static/img/         # Documentation assets
 ```
 
 ## License
