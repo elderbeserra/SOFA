@@ -164,7 +164,7 @@ cython_debug/
 #.idea/
 
 # IDEs
-.cursor/
+.cursor
 # uv
 uv.lock
 
